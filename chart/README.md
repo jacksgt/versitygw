@@ -51,9 +51,22 @@ The `gateway.backend.type` value selects the storage backend. Use `gateway.backe
 | **Persistence** | `persistence.enabled=true` — provisions a PVC for backend data and IAM storage; defaults to `10Gi` |
 | **NetworkPolicy** | `networkPolicy.enabled=true` — restricts ingress to selected pods/namespaces; allows all egress |
 
-## Multi-Replica Deployments
+## Scaling and Persistence
 
-When setting `replicaCount` greater than 1, the underlying storage must support concurrent access. Set `persistence.accessMode=ReadWriteMany` and use a storage class that supports it (e.g. NFS, CephFS, or a cloud-managed `RWX` provisioner).
+By default, this chart enables persistence via a `PersistentVolumeClaim` (PVC) to ensure data consistency and prevent data loss.
+
+### Horizontal Scaling (replicas > 1)
+
+When scaling `versitygw` horizontally by setting `replicaCount` greater than 1, special care must be taken regarding the storage backend:
+
+- **POSIX or Internal IAM**: These backends store state locally on the filesystem.
+    - Using **ReadWriteOnce (RWO)**: All replicas must be scheduled on the **same Kubernetes node** to share the same volume. This is useful for process-level concurrency (e.g., when using high-performance local block storage) but limits high availability across nodes.
+    - Using **ReadWriteMany (RWX)**: Replicas can be distributed across **multiple nodes** in the cluster. This is the recommended approach for true horizontal scaling and high availability. When using RWX, it is also recommended to use pod anti-affinity (via `affinity` in `values.yaml`) to ensure pods are distributed across nodes/zones.
+- **Stateless Backends (S3, Azure)**: If you are using a stateless storage backend (e.g. proxying to another S3 store) **and** you are either not using IAM or using an external IAM provider (e.g. LDAP, Vault), persistence can be safely disabled by setting `persistence.enabled=false`.
+
+### Safety Validation
+
+The chart includes a safety validation that prevents deploying multiple replicas with a POSIX backend or Internal IAM if persistence is disabled (`persistence.enabled=false`). This is to prevent data loss and inconsistent state across pods, as each pod would otherwise have its own ephemeral `emptyDir` storage.
 
 ## Configuration
 
